@@ -8,7 +8,7 @@ Procedure and scripts to deploy DataCore SANsymphony 10.0 PSP22 in a hyperconver
 
 ## AI assistance disclosure
 
-The procedure and all the scripts in this repository were written with the help of an AI assistant (Claude, by Anthropic), over several working sessions directed by the author. This covers the bash and PowerShell code, the documentation in both languages, the translations and this README.
+The procedure and all the scripts in this repository were written with the help of an AI assistant, over several working sessions directed by the author. This covers the bash and PowerShell code, the documentation in both languages, the translations and this README.
 
 What that means in practice:
 
