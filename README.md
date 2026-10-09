@@ -4,7 +4,21 @@ Procedure and scripts to deploy DataCore SANsymphony 10.0 PSP22 in a hyperconver
 
 *Version française : [docs/datacore-xcp-ng-deployment_FR.md](docs/datacore-xcp-ng-deployment_FR.md) — scripts en français dans [scripts/fr/](scripts/fr/).*
 
-> **Read this first.** XCP-ng is not in the DataCore compatibility matrix: mirrored vDisks are "Not Qualified" on it, with no contractual support for high availability. This work comes from a test pool; several points are still to be validated (section 11 of the procedure). Use it at your own risk, and run the validation tests of section 8 on your own hardware before any production use.
+> **Read this first.** XCP-ng is not in the DataCore compatibility matrix: mirrored vDisks are "Not Qualified" on it, with no contractual support for high availability. This work comes from a test pool and was written with the help of an AI assistant (see the disclosure below); several points are still to be validated (section 11 of the procedure). Use it at your own risk, and run the validation tests of section 8 on your own hardware before any production use.
+
+## AI assistance disclosure
+
+The procedure and all the scripts in this repository were written with the help of an AI assistant (Claude, by Anthropic), over several working sessions directed by the author. This covers the bash and PowerShell code, the documentation in both languages, the translations and this README.
+
+What that means in practice:
+
+- **Human part**: the architecture choices, the hardware, the deployment on a test pool, the execution of the validation tests (section 8) and the feedback that drove each revision ([CHANGELOG.md](CHANGELOG.md)) come from the author.
+- **AI part**: the text and the code were drafted and revised by the assistant from that feedback and from the DataCore and XCP-ng documentation. The author is an infrastructure administrator, not a professional developer: the code has not been through an independent human code review.
+- **Not everything has been run for real**: some parts were only syntax-checked or tested against simulated cmdlets, and some explanations are deductions rather than observations. They are listed as open items in section 11 of the procedure.
+
+Read the scripts before running them, test on non-production hardware first, and report anything wrong through the repository issues.
+
+*Français : la procédure et l'ensemble des scripts de ce dépôt ont été rédigés avec l'aide d'un assistant IA (Claude, d'Anthropic), sous la direction de l'auteur, qui a fait les choix d'architecture, le déploiement sur un pool de test et les tests de validation. Le code n'a pas fait l'objet d'une revue humaine indépendante, et certaines parties n'ont été contrôlées qu'en syntaxe ou avec des cmdlets simulées (points ouverts, section 11 de la procédure). Lisez les scripts avant de les exécuter et testez hors production.*
 
 ## Contents
 
