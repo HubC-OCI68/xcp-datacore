@@ -18,7 +18,7 @@ What that means in practice:
 
 Read the scripts before running them, test on non-production hardware first, and report anything wrong through the repository issues.
 
-*Français : la procédure et l'ensemble des scripts de ce dépôt ont été rédigés avec l'aide d'un assistant IA (Claude, d'Anthropic), sous la direction de l'auteur, qui a fait les choix d'architecture, le déploiement sur un pool de test et les tests de validation. Le code n'a pas fait l'objet d'une revue humaine indépendante, et certaines parties n'ont été contrôlées qu'en syntaxe ou avec des cmdlets simulées (points ouverts, section 11 de la procédure). Lisez les scripts avant de les exécuter et testez hors production.*
+*Français : la procédure et l'ensemble des scripts de ce dépôt ont été rédigés avec l'aide d'un assistant IA, sous la direction de l'auteur, qui a fait les choix d'architecture, le déploiement sur un pool de test et les tests de validation. Le code n'a pas fait l'objet d'une revue humaine indépendante, et certaines parties n'ont été contrôlées qu'en syntaxe ou avec des cmdlets simulées (points ouverts, section 11 de la procédure). Lisez les scripts avant de les exécuter et testez hors production.*
 
 ## Contents
 
