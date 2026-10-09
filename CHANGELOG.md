@@ -4,6 +4,16 @@ History of the procedure [docs/datacore-xcp-ng-deployment.md](docs/datacore-xcp-
 
 *Version française : [CHANGELOG_FR.md](CHANGELOG_FR.md).*
 
+## Validation of 2026-10-09 (revision 9, scripts unchanged)
+
+Origin: test feedback from the pool with the scripts of revision 9.
+
+| Topic | Result |
+| --- | --- |
+| `ssh-setup` | Validated: key-based root SSH in place between the two dom0s. Open item of revision 8 closed |
+| `stop --ups` | Validated with production VMs running: clean shutdown of the guest VMs, then shutdown of the cluster (DataCore VMs, then hosts). Open item of revision 9 closed |
+| Procedure | Results added in section 8; section 11: validated items listed, matching open items removed, published revision fixed (9) |
+
 ## Changes of 2026-10-09 (revision 9)
 
 Origin: during a UPS shutdown, the production VMs were not taken into account before the DataCore VMs were stopped.

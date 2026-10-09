@@ -606,6 +606,13 @@ Après chaque test, attendre *Up to date* sur les deux serveurs et refaire les c
 | Idem, VM DataCore sur un réseau dédié | DataCore sain ; fence de l'hôte 2 au bout de 2 min | Comportement xHA prévu à 2 hôtes ; bond de management (section 2) |
 | Connexions iSCSI entre les serveurs DataCore | Seuls les liens MR sont nécessaires | `InitiatorPorts` réduit à MR1 et MR2 |
 
+**Résultats du 2026-10-09** (scripts de la révision 9) :
+
+| Test | Constat | Traitement |
+| --- | --- | --- |
+| `ssh-setup` | Validé : SSH root par clé en place entre les deux dom0 | Point ouvert levé (section 11) |
+| Arrêt onduleur (`stop --ups`), VM de production en marche | Validé : arrêt propre des VM invitées, puis arrêt du cluster (VM DataCore, puis hôtes) | Point ouvert levé (section 11) |
+
 **Enchaînements obligatoires, sans reboot entre les étapes.** Le défaut du cache ALUA (section 7) n'apparaît qu'à la seconde panne, sur des chemins remis en service par la première. Chaque enchaînement se termine par un gel de l'autre VM DataCore :
 
 1. Crash de la VM DataCore 2, retour à *Up to date*, puis VM DataCore 1 figée.
@@ -803,7 +810,7 @@ Les scripts intègrent déjà la correction de chacun de ces cas, sauf la perte 
 
 ## 11. Historique et points ouverts
 
-Cette version publiée correspond à la révision 8 (2026-10-08). L'historique détaillé des modifications est dans [CHANGELOG_FR.md](../CHANGELOG_FR.md).
+Cette version publiée correspond à la révision 9 (2026-10-09). L'historique détaillé des modifications est dans [CHANGELOG_FR.md](../CHANGELOG_FR.md).
 
 **Écarts assumés avec la documentation DataCore**
 
@@ -818,13 +825,17 @@ Cette version publiée correspond à la révision 8 (2026-10-08). L'historique d
 | Witness | Optionnel, recommandé contre le split-brain ; pas sur un serveur DataCore | Non configuré | Nécessite une troisième machine hors du pool ; à décider |
 | XCP-ng | Absent de la matrice de compatibilité (XenServer 7.1, 7.2, 8.2) | XCP-ng 8.3 | vDisks miroirs « Not Qualified » (section 1) |
 
+**Points validés sur le pool** (2026-10-09, scripts de la révision 9), retirés des points ouverts :
+
+- `ssh-setup` : validé. Le SSH root par clé est en place entre les deux dom0.
+- `stop --ups` : validé avec des VM de production en marche. Arrêt propre des VM invitées, puis arrêt du cluster (VM DataCore, puis hôtes).
+
 **Points ouverts avant production**
 
 - Variables obligatoires du site : `NTP_SERVERS`, `PCI_BDF`, `NIC` (`datacore-xcp.conf`) et `Nodes[N].MgmtIp` (`DataCoreNode.psd1`).
 - **cron et `PATH` (révision 8)** : la cause donnée en section 10 est une déduction, pas un constat. Avant de remplacer le script, relever sur un hôte `grep datacore-xcp /var/log/daemon.log /var/log/messages | tail` et `grep datacore-xcp /var/log/cron | tail -3` : une ligne `Echec du login iSCSI` chaque minute la confirme. Après `host N` : débrancher les 2 liens MR, les rebrancher, et vérifier que l'état ALUA du noyau revient dans la minute sans `iscsi`.
 - **Relecture ALUA du noyau (révision 8)** : confirmer que le rescan du device, ou à défaut celui des sessions, est bien ce qui rétablit les chemins, comme le faisait `iscsi`. Si `encore incoherent` reste dans le syslog, relever `multipathd show paths format "%d %T %p"` et les fichiers `access_state` avant de lancer `iscsi`.
 - **Timeout HA (révision 8)** : confirmer sur le pool que `ha-configuration` contient `timeout: 120` après `ha-on`, et que `/etc/xensource/xhad.conf` porte les balises `StateFileTimeout` / `HeartbeatTimeout` lues par `status` (sinon la valeur `xhad.conf` s'affiche vide, sans conséquence sur l'alerte, qui repose sur le champ du pool).
-- **`ssh-setup` (révision 8)** : écrit sans connaître la raison de l'échec du SSH pendant les tests (clé absente ou clé d'hôte inconnue supposées). À valider ; s'il échoue encore, relever la sortie de `ssh -v -o BatchMode=yes root@autre-hote true`.
 - **Perte du management (révision 8)** : refaire le test en débranchant le management de l'hôte 1 pour relever quel hôte se fence (la règle ne dépend pas du câble débranché), puis avec le bond de management en place.
 - **Phase `Initiator` (révision 8)** : le retrait des connexions FE (`Unregister-IscsiSession`, `Disconnect-IscsiTarget`, `Remove-IscsiTargetPortal`) n'a été contrôlé qu'en syntaxe. À valider sur une VM DataCore, vDisks *Up to date*, avant l'autre ; vérifier qu'il ne reste aucune cible persistante vers un port FE (`iscsicli ListPersistentTargets`).
 - `hardware_handler "1 alua"` : validé par test ; absent des guides DataCore XenServer et Linux (écart documenté en section 11).
@@ -839,7 +850,6 @@ Cette version publiée correspond à la révision 8 (2026-10-08). L'historique d
 - Script DataCore Best Practices : relever dans son journal le résultat de chaque réglage sur les cartes PV XCP-ng (RSS, RSC et SR-IOV peuvent ne pas être exposés).
 - `WIN_TEMPLATE` : vérifier le name-label exact du modèle Windows Server 2025 sur le pool (`dcvm` le contrôle).
 - Réactivation de la HA : confirmer qu'elle ne relance pas les VM arrêtées proprement (`start` les démarre de toute façon).
-- **Arrêt des VM de production par `stop` (révision 9)** : vérifié avec des commandes XCP-ng simulées seulement. À rejouer sur le pool avec des VM de production en marche (`stop --ups`), en relevant dans `/var/log/datacore-xcp.log` l'ordre des arrêts et la durée totale.
 - `stop --ups` : valider qu'un arrêt Windows sans *Stop DataCore Server* laisse des vDisks cohérents.
 - `start` : vérifier que le port 3260 d'une VM DataCore est fermé quand DataCore est stoppé dans la DMC et ouvert une fois démarré (`timeout 3 bash -c "</dev/tcp/IP_FE1/3260"` depuis un dom0). Sinon l'attente de `start` ne contrôle rien.
 - `start` après `stop --ups` : vérifier que DataCore repart seul au boot de Windows quand il n'a pas été stoppé dans la DMC.

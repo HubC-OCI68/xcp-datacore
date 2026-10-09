@@ -606,6 +606,13 @@ After each test, wait for *Up to date* on both servers and redo the pre-test che
 | Same, DataCore VMs on a dedicated network | DataCore healthy; host 2 fenced after 2 min | Designed xHA behavior on 2 hosts; management bond (section 2) |
 | iSCSI connections between the DataCore servers | Only the MR links are needed | `InitiatorPorts` reduced to MR1 and MR2 |
 
+**Results of 2026-10-09** (scripts of revision 9):
+
+| Test | Observed | Handling |
+| --- | --- | --- |
+| `ssh-setup` | Validated: key-based root SSH in place between the two dom0s | Open item closed (section 11) |
+| UPS shutdown (`stop --ups`), production VMs running | Validated: clean shutdown of the guest VMs, then shutdown of the cluster (DataCore VMs, then hosts) | Open item closed (section 11) |
+
 **Mandatory sequences, without reboot between steps.** The ALUA cache defect (section 7) only shows up on the second failure, on paths brought back into service by the first one. Each sequence ends with a hang of the other DataCore VM:
 
 1. Crash of DataCore VM 2, back to *Up to date*, then DataCore VM 1 hung.
@@ -804,7 +811,7 @@ The scripts already include the fix for each of these cases, except the manageme
 
 ## 11. History and open items
 
-This published version is revision 8 (2026-10-08). The detailed change history is in [CHANGELOG.md](../CHANGELOG.md).
+This published version is revision 9 (2026-10-09). The detailed change history is in [CHANGELOG.md](../CHANGELOG.md).
 
 **Deviations from the DataCore documentation, kept on purpose**
 
@@ -819,13 +826,17 @@ This published version is revision 8 (2026-10-08). The detailed change history i
 | Witness | Optional, recommended against split-brain; not on a DataCore server | Not configured | Needs a third machine outside the pool; to decide |
 | XCP-ng | Not in the compatibility matrix (XenServer 7.1, 7.2, 8.2) | XCP-ng 8.3 | Mirrored vDisks "Not Qualified" (section 1) |
 
+**Items validated on the pool** (2026-10-09, scripts of revision 9), removed from the open items:
+
+- `ssh-setup`: validated. Key-based root SSH is in place between the two dom0s.
+- `stop --ups`: validated with production VMs running. Clean shutdown of the guest VMs, then shutdown of the cluster (DataCore VMs, then hosts).
+
 **Open items before production**
 
 - Mandatory site variables: `NTP_SERVERS`, `PCI_BDF`, `NIC` (`datacore-xcp.conf`) and `Nodes[N].MgmtIp` (`DataCoreNode.psd1`).
 - **cron and `PATH` (revision 8)**: the cause given in section 10 is a deduction, not an observation. Before replacing the script, record on a host `grep datacore-xcp /var/log/daemon.log /var/log/messages | tail` and `grep datacore-xcp /var/log/cron | tail -3`: a line `iSCSI login failed` every minute confirms it. After `host N`: unplug both MR links, plug them back, and check that the kernel ALUA state comes back within the minute without `iscsi`.
 - **Kernel ALUA re-read (revision 8)**: confirm that the device rescan, or failing that the session rescan, is what brings the paths back, as `iscsi` did. If `still inconsistent` stays in syslog, record `multipathd show paths format "%d %T %p"` and the `access_state` files before running `iscsi`.
 - **HA timeout (revision 8)**: confirm on the pool that `ha-configuration` holds `timeout: 120` after `ha-on`, and that `/etc/xensource/xhad.conf` carries the tags `StateFileTimeout` / `HeartbeatTimeout` read by `status` (otherwise the `xhad.conf` value is shown empty, without consequence for the alert, which relies on the pool field).
-- **`ssh-setup` (revision 8)**: written without knowing why SSH failed during the tests (missing key or unknown host key assumed). To validate; if it still fails, record the output of `ssh -v -o BatchMode=yes root@other-host true`.
 - **Management loss (revision 8)**: repeat the test by unplugging the management of host 1 to record which host fences (the rule does not depend on the cable unplugged), then with the management bond in place.
 - **`Initiator` phase (revision 8)**: the removal of the FE connections (`Unregister-IscsiSession`, `Disconnect-IscsiTarget`, `Remove-IscsiTargetPortal`) has only been syntax-checked. To validate on one DataCore VM, vDisks *Up to date*, before the other one; check that no persistent target to an FE port is left (`iscsicli ListPersistentTargets`).
 - `hardware_handler "1 alua"`: validated by test; absent from the DataCore XenServer and Linux guides (deviation documented in section 11).
@@ -840,7 +851,6 @@ This published version is revision 8 (2026-10-08). The detailed change history i
 - DataCore Best Practices script: record in its log the result of each setting on the XCP-ng PV adapters (RSS, RSC and SR-IOV may not be exposed).
 - `WIN_TEMPLATE`: check the exact name-label of the Windows Server 2025 template on the pool (`dcvm` checks it).
 - HA re-enablement: confirm that it does not restart VMs that were shut down cleanly (`start` starts them anyway).
-- **Shutdown of the production VMs by `stop` (revision 9)**: checked with simulated XCP-ng commands only. To replay on the pool with production VMs running (`stop --ups`), recording the order of the shutdowns and the total duration from `/var/log/datacore-xcp.log`.
 - `stop --ups`: validate that a Windows shutdown without *Stop DataCore Server* leaves the vDisks consistent.
 - `start`: check that port 3260 of a DataCore VM is closed when DataCore is stopped in the DMC and open once started (`timeout 3 bash -c "</dev/tcp/IP_FE1/3260"` from a dom0). Otherwise the `start` wait checks nothing.
 - `start` after `stop --ups`: check that DataCore restarts on its own at Windows boot when it was not stopped in the DMC.

@@ -4,6 +4,16 @@ Historique de la procédure [docs/datacore-xcp-ng-deployment_FR.md](docs/datacor
 
 *English version: [CHANGELOG.md](CHANGELOG.md).*
 
+## Validation du 2026-10-09 (révision 9, scripts inchangés)
+
+Origine : retour de tests sur le pool avec les scripts de la révision 9.
+
+| Sujet | Résultat |
+| --- | --- |
+| `ssh-setup` | Validé : SSH root par clé en place entre les deux dom0. Point ouvert de la révision 8 levé |
+| `stop --ups` | Validé avec des VM de production en marche : arrêt propre des VM invitées, puis arrêt du cluster (VM DataCore, puis hôtes). Point ouvert de la révision 9 levé |
+| Procédure | Résultats ajoutés en section 8 ; section 11 : points validés listés, points ouverts correspondants retirés, révision publiée corrigée (9) |
+
 ## Modifications du 2026-10-09 (révision 9)
 
 Origine : en arrêt sur onduleur, les VM de production n'étaient pas prises en compte avant l'arrêt des VM DataCore.
