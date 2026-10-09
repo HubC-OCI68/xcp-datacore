@@ -787,7 +787,7 @@ Les scripts intègrent déjà la correction de chacun de ces cas, sauf la perte 
 
 ## 11. Historique et points ouverts
 
-Cette version publiée correspond à la révision 8 (2026-10-08). L'historique détaillé des modifications est celui du dépôt Git.
+Cette version publiée correspond à la révision 8 (2026-10-08). L'historique détaillé des modifications est dans [CHANGELOG_FR.md](../CHANGELOG_FR.md).
 
 **Écarts assumés avec la documentation DataCore**
 

@@ -788,7 +788,7 @@ The scripts already include the fix for each of these cases, except the manageme
 
 ## 11. History and open items
 
-This published version is revision 8 (2026-10-08). The detailed change history is the Git history of the repository.
+This published version is revision 8 (2026-10-08). The detailed change history is in [CHANGELOG.md](../CHANGELOG.md).
 
 **Deviations from the DataCore documentation, kept on purpose**
 
