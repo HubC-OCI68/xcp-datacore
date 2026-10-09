@@ -26,7 +26,7 @@ Read the scripts before running them, test on non-production hardware first, and
 | --- | --- |
 | [docs/datacore-xcp-ng-deployment.md](docs/datacore-xcp-ng-deployment.md) | The procedure (English) |
 | [docs/datacore-xcp-ng-deployment_FR.md](docs/datacore-xcp-ng-deployment_FR.md) | The procedure (French) |
-| [CHANGELOG.md](CHANGELOG.md) / [CHANGELOG_FR.md](CHANGELOG_FR.md) | Change history, revisions 1 to 8 |
+| [CHANGELOG.md](CHANGELOG.md) / [CHANGELOG_FR.md](CHANGELOG_FR.md) | Change history, revisions 1 to 9 |
 | [scripts/en/](scripts/en/) | Scripts and variables files with English messages |
 | [scripts/fr/](scripts/fr/) | The same scripts with French messages |
 

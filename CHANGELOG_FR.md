@@ -4,6 +4,18 @@ Historique de la procédure [docs/datacore-xcp-ng-deployment_FR.md](docs/datacor
 
 *English version: [CHANGELOG.md](CHANGELOG.md).*
 
+## Modifications du 2026-10-09 (révision 9)
+
+Origine : en arrêt sur onduleur, les VM de production n'étaient pas prises en compte avant l'arrêt des VM DataCore.
+
+| Sujet | Modification |
+| --- | --- |
+| `stop` / `stop --ups` | Arrêt des VM invitées isolé dans une étape explicite et tracée, avant le détachement des SR et l'arrêt des VM DataCore ; VM en pause prises en compte ; contrôle qu'aucune VM invitée ne reste en marche (arrêt forcé sinon ; question en mode normal, poursuite en mode onduleur) ; message distinct pour un arrêt propre et pour un arrêt forcé (outils invités absents ou délai dépassé) |
+| Procédure (section 9) | Ordre d'arrêt décrit étape par étape ; outils invités exigés dans les VM de production ; budget d'autonomie de l'onduleur (4 × `SHUTDOWN_TIMEOUT` au pire) |
+| Prérequis, sections 3.2, 8 et 10 | Autonomie de l'onduleur ; description de `stop` ; résultat attendu du test `stop --ups` avec des VM de production ; piège ajouté |
+
+Application sur un pool existant : remplacer `datacore-xcp.sh` sur le master, puis **3** `sync`. Vérifier les outils invités : `xe vm-list params=name-label,PV-drivers-detected`.
+
 ## Modifications du 2026-10-08 (révision 8)
 
 Origine : remarques après un déploiement complet et la série complète des tests de la section 8 avec les scripts de la révision 7 (résultats en section 8).

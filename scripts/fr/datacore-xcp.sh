@@ -594,9 +594,38 @@ cmd_protect() {
 shutdown_vm() {   # code retour 2 si l'arret a du etre force
   local v=$1 name; name=$(xe vm-param-get uuid="$v" param-name=name-label)
   echo "Arret $name"
-  timeout "$SHUTDOWN_TIMEOUT" xe vm-shutdown uuid="$v" && return
-  echo "  $name : pas d'arret propre en ${SHUTDOWN_TIMEOUT} s -> arret force"
+  timeout "$SHUTDOWN_TIMEOUT" xe vm-shutdown uuid="$v" && { echo "  $name : arretee proprement"; return 0; }
+  echo "  $name : pas d'arret propre (outils invites absents, ou pas termine en ${SHUTDOWN_TIMEOUT} s) -> arret force"
   xe vm-shutdown uuid="$v" --force; return 2
+}
+guests_up() {   # VM en marche ou en pause, hors VM DataCore ($1 = " uuid1 uuid2 ")
+  local v s
+  for s in running paused; do
+    for v in $(xe vm-list power-state=$s is-control-domain=false --minimal | tr , ' '); do
+      [[ $1 == *" $v "* ]] || echo "$v"
+    done
+  done
+}
+stop_guests() {
+  # VM invitees (production) d'abord : leurs disques sont sur le SR DataCore, elles doivent donc toutes
+  # etre arretees avant le detachement du SR et avant l'arret des VM DataCore. Arret propre en parallele,
+  # force apres SHUTDOWN_TIMEOUT, puis controle qu'il n'en reste aucune. $1 = uuid des VM DataCore,
+  # $2 = 1 en mode onduleur.
+  local l v left
+  l=$(guests_up "$1")
+  [[ -n $l ]] || { echo "VM invitees : aucune en marche"; return 0; }
+  echo "VM invitees : arret de $(wc -w <<<"$l") VM AVANT les VM DataCore (arret propre en parallele, ${SHUTDOWN_TIMEOUT} s max, puis force)"
+  for v in $l; do shutdown_vm "$v" & done; wait
+  left=$(guests_up "$1")
+  for v in $left; do
+    echo "  encore en marche : $(xe vm-param-get uuid="$v" param-name=name-label) -> arret force"
+    xe vm-shutdown uuid="$v" --force
+  done
+  left=$(guests_up "$1")
+  [[ -z $left ]] && { echo "VM invitees : toutes arretees"; return 0; }
+  echo "ATTENTION : $(wc -w <<<"$left") VM invitee(s) impossible(s) a arreter : $left"
+  (($2)) && { echo "Mode onduleur : l'arret continue quand meme"; return 0; }
+  ask "Arreter quand meme les VM DataCore ?" || die "arret interrompu : VM invitees encore en marche"
 }
 # ---------------------------------------------------------------- ordre DataCore
 # Arret : DC-02 puis DC-01 (DC-01 toujours en dernier). Redemarrage : dernier arrete en premier.
@@ -709,9 +738,7 @@ cmd_stop() {
   m=$(local_node) || exit 1; o=$((3-m))
   p=$(pool); dc=" $(vm_uuid 1) $(vm_uuid 2) "
   [[ $(xe pool-param-get uuid="$p" param-name=ha-enabled) == true ]] && xe pool-ha-disable
-  for v in $(xe vm-list power-state=running is-control-domain=false --minimal | tr , ' '); do
-    [[ $dc == *" $v "* ]] || shutdown_vm "$v" &
-  done; wait
+  stop_guests "$dc" "$ups"
   for s in "$SR_NAME" "$HB_SR_NAME"; do for v in $(sr_pbds "$s" currently-attached=true); do xe pbd-unplug uuid="$v"; done; done
   ((ups)) && echo "Mode onduleur : arret Windows des VM DataCore sans passage par la DMC"
   # DataCore : DC-02 puis DC-01 ; un serveur deja arrete (maintenance) est saute. Memorise le dernier arrete.

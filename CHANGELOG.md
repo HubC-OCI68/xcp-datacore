@@ -4,6 +4,18 @@ History of the procedure [docs/datacore-xcp-ng-deployment.md](docs/datacore-xcp-
 
 *Version française : [CHANGELOG_FR.md](CHANGELOG_FR.md).*
 
+## Changes of 2026-10-09 (revision 9)
+
+Origin: during a UPS shutdown, the production VMs were not taken into account before the DataCore VMs were stopped.
+
+| Topic | Change |
+| --- | --- |
+| `stop` / `stop --ups` | Guest VM shutdown isolated in an explicit, traced step, before the SRs are detached and the DataCore VMs stopped; paused VMs taken into account; check that no guest VM is left running (forced shutdown otherwise; question in normal mode, continues in UPS mode); distinct message for a clean and for a forced shutdown (guest tools missing or delay exceeded) |
+| Procedure (section 9) | Shutdown order described step by step; guest tools required in the production VMs; UPS runtime budget (4 × `SHUTDOWN_TIMEOUT` at worst) |
+| Prerequisites, sections 3.2, 8 and 10 | UPS runtime; description of `stop`; expected result of the `stop --ups` test with production VMs; pitfall added |
+
+Applying to an existing pool: replace `datacore-xcp.sh` on the master, then **3** `sync`. Check the guest tools: `xe vm-list params=name-label,PV-drivers-detected`.
+
 ## Changes of 2026-10-08 (revision 8)
 
 Origin: remarks after a full deployment and the complete series of tests of section 8 with the scripts of revision 7 (results in section 8).

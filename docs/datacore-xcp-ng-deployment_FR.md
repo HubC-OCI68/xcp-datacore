@@ -1,6 +1,6 @@
 # Déploiement DataCore SANsymphony PSP22 sur pool XCP-ng 8.3 (2 nœuds)
 
-Version du 2026-10-08 (révision 8). Les écarts assumés et les points encore ouverts sont en section 11.
+Version du 2026-10-09 (révision 9). Les écarts assumés et les points encore ouverts sont en section 11.
 
 ## 1. Périmètre et architecture
 
@@ -76,7 +76,7 @@ Le miroir reste strictement VM à VM : les dom0 n'ont pas d'IP sur MR1/MR2. Les 
   - Dans ce cas, valider le test « coupure d'un lien FE » de la section 8 : le trafic local doit continuer dans le bridge quand le lien physique tombe.
 - Un réseau de management séparé des 4 cartes de stockage, **sur un bond de deux cartes** (actif/passif, idéalement sur deux switchs). Le heartbeat réseau HA ne passe que par ce réseau. Sur un pool de 2 hôtes, sa perte sur un hôte se termine, après `HA_TIMEOUT`, par le fence de l'un des deux hôtes alors que le stockage et DataCore sont sains (test de la section 8) : les hôtes ne peuvent pas distinguer ce cas d'un crash de l'autre. Le bond est la seule protection.
 - **Le VIF de management des VM DataCore ne doit pas dépendre du seul lien de management d'un hôte.** Les serveurs DataCore communiquent entre eux par ce réseau : au débranchement du câble de management de l'hôte 2, VM DataCore sur ce même lien, ils se sont perdus et le front-end de l'hôte 2 a été coupé. Avec les VM DataCore sur un réseau dédié, DataCore est resté sain. Placer le VIF 0 sur un réseau dédié (`DC_MGMT_NET`) ou sur le réseau de management en bond.
-- Un onduleur capable de déclencher une commande sur le master (NUT ou agent constructeur), pour lancer `./datacore-xcp.sh stop --ups`. Une coupure électrique simultanée des deux nœuds a deux effets : les écritures en cache RAM de DataCore sont perdues, et le démarrage suivant bloque (section 9).
+- Un onduleur capable de déclencher une commande sur le master (NUT ou agent constructeur), pour lancer `./datacore-xcp.sh stop --ups`. Son autonomie doit couvrir l'arrêt complet, VM de production comprises (budget en section 9), et la commande doit être déclenchée assez tôt. Une coupure électrique simultanée des deux nœuds a deux effets : les écritures en cache RAM de DataCore sont perdues, et le démarrage suivant bloque (section 9).
 - BIOS/UEFI de chaque hôte réglé comme DataCore le recommande pour un serveur DataCore (la VM DataCore partage les CPU de l'hôte) : Intel Turbo Boost désactivé, économies d'énergie (C-states) désactivées avec le profil Static High / performances maximales, Collaborative Power Control désactivé, AES-NI activé, Hyper-Threading activé sur les CPU de 2014 ou plus récents. Le profil faible latence du constructeur s'applique, sauf s'il contredit ces réglages.
 - Si les liens de stockage passent par des switchs : pas de Spanning Tree sur les ports iSCSI (STP, RSTP, MSTP), contrôle de flux matériel sur les cartes et les ports des switchs, pas de sursouscription, MTU des switchs supérieur à `MTU`.
 
@@ -177,7 +177,7 @@ Le menu affiche la commande directe équivalente, revient au menu après chaque 
 | 19 | `check [--quiet]` | chaque hôte (cron, 5 min) | Relit l'état ALUA du noyau comme `relogin`. Signale toute LUN DataCore avec moins de 4 chemins `ready`, tout chemin `ready` resté non actif pour le noyau et, sur le master, une HA active avec un timeout différent de `HA_TIMEOUT` (syslog sauf `--quiet`, code retour 1) |
 | 20 | `mpverify` | chaque hôte | Vérifie que la configuration multipath effective est toujours celle écrite par `host N` (`defaults`, bloc DataCore, `hwhandler='1 alua'` sur les maps) et que le fichier cron porte son `PATH`. Une mise à jour XCP-ng peut remplacer les fichiers multipath. Code retour 1 en cas d'écart : relancer `host N` |
 | 21 | `start` | master | Démarrage à froid ordonné : la VM DataCore arrêtée en dernier démarre en premier, DataCore doit y répondre sur le port 3260 avant le démarrage de l'autre ; arrêt non maîtrisé détecté (section 9). Puis SR, HA et VM protégées par ordre |
-| 22 | `stop [--ups]` | master | Arrêt complet ordonné : VM invitées, SR, VM DataCore 2 puis 1 (dernier arrêt mémorisé dans la base du pool), puis l'autre hôte et le master en dernier ; `--ups` sans confirmation, hôtes compris |
+| 22 | `stop [--ups]` | master | Arrêt complet ordonné : **arrêt propre de toutes les VM invitées (production) d'abord**, en parallèle, forcé au bout de `SHUTDOWN_TIMEOUT`, avec contrôle qu'il n'en reste aucune ; puis SR, VM DataCore 2 puis 1 (dernier arrêt mémorisé dans la base du pool), puis l'autre hôte et le master en dernier ; `--ups` sans confirmation, hôtes compris |
 | 23 / 24 | `maint N` / `resume N` | master | Mise en maintenance / retour d'un nœud (patching XCP-ng). `resume N` lance d'abord `mpverify` sur l'hôte N et s'arrête en cas d'écart |
 | 25 | `rescue` | hôte bloqué | Sortie d'urgence de la HA (deadlock statefile) |
 
@@ -587,7 +587,7 @@ done | tee /root/alua-watch-$(date +%H%M).log
 | Perte du réseau de management | Débrancher le management de l'hôte 2 (lien unique, sans bond) | DataCore sain si les VM DataCore sont sur `DC_MGMT_NET`. Fence d'un hôte au bout de `HA_TIMEOUT` (120 s) : comportement xHA prévu à 2 hôtes (section 7). Ses VM protégées redémarrent sur l'autre hôte |
 | Perte du réseau de management, management en bond | Débrancher un lien du bond de management de l'hôte 2 | Pas de perte de heartbeat, pas de fence |
 | Arrêt et redémarrage à froid (`stop` / `start`) | **22** `stop`, puis **21** `start` | Après `stop` : clé `datacore-last-stopped` à `1:dmc`. `start` démarre la VM DataCore 1, demande le *Start DataCore Server*, attend le port 3260, puis traite la VM DataCore 2 ; clé effacée ; aucune resynchronisation complète dans la DMC ; SR rattachés et **utilisables sans lancer `iscsi` à la main**, HA activée seulement une fois les chemins actifs pour le noyau ; VM protégées démarrées par ordre, à chronométrer |
-| Arrêt onduleur (`stop --ups`) | Commande seule, puis `start` | VM DataCore 2 arrêtée avant la 1, clé à `1:ups` ; autre hôte éteint avant le master. Au `start` : DataCore repart seul au boot de Windows, la VM DataCore 1 sert avant le démarrage de la 2 ; vDisks cohérents |
+| Arrêt onduleur (`stop --ups`) | Commande seule, VM de production en marche sur les 2 hôtes, puis `start` | Toutes les VM invitées arrêtées proprement **avant** toute VM DataCore (journal : `VM invitees : toutes arretees` avant `Arret DC-02`), aucune erreur disque dans les invités au redémarrage ; VM DataCore 2 arrêtée avant la 1, clé à `1:ups` ; autre hôte éteint avant le master. Au `start` : DataCore repart seul au boot de Windows, la VM DataCore 1 sert avant le démarrage de la 2 ; vDisks cohérents |
 | `stop --ups` après bascule du master | Crash du nœud 1, retour, puis `stop --ups` sur l'hôte 2 devenu master | Hôte 1 éteint avant l'hôte 2 ; VM DataCore 2 arrêtée avant la 1 |
 | Coupure électrique des 2 nœuds, HA active | Power off simultané | Blocage sur `attach-static-vdis`, sortie par `rescue` (section 9). `start` signale l'arrêt non maîtrisé (clé absente) et demande le traitement « double panne » dans la DMC avant de rattacher les SR |
 | Cycle de patching | `maint 2` puis `resume 2` | Migration, arrêt, retour, HA réactivée |
@@ -622,14 +622,29 @@ Toute opération planifiée commence par désactiver la HA, et ne la réactive q
 
 | Opération | Menu (master) | Étapes manuelles |
 | --- | --- | --- |
-| Arrêt complet | **22** `stop`, normal | *Stop DataCore Server* dans la DMC serveur par serveur, quand le script le demande : VM DataCore 2, puis VM DataCore 1 ; le script arrête ensuite l'autre hôte, puis le master |
-| Arrêt sur onduleur | `./datacore-xcp.sh stop --ups` | Aucune : lancé par l'agent onduleur ; arrêt Windows des VM DataCore (2 puis 1), puis de l'autre hôte, puis du master |
+| Arrêt complet | **22** `stop`, normal | Le script arrête d'abord toutes les VM invitées. Puis *Stop DataCore Server* dans la DMC serveur par serveur, quand le script le demande : VM DataCore 2, puis VM DataCore 1 ; le script arrête ensuite l'autre hôte, puis le master |
+| Arrêt sur onduleur | `./datacore-xcp.sh stop --ups` | Aucune : lancé par l'agent onduleur ; arrêt propre de toutes les VM invitées, puis arrêt Windows des VM DataCore (2 puis 1), puis de l'autre hôte, puis du master |
 | Démarrage à froid | **21** `start` | Démarrer les deux hôtes, attendre dom0, lancer `start`. Après un `stop` normal : *Start DataCore Server* dans la DMC sur chaque VM DataCore quand le script le demande, VM DataCore 1 d'abord. Confirmer *Up to date* (la HA n'est activée qu'une fois les 4 chemins rétablis et actifs pour le noyau sur chaque hôte) ; démarrer les VM non protégées |
 | Patching XCP-ng d'un nœud | **23** `maint` puis **24** `resume` | *Stop DataCore Server* sur la VM DataCore N, `yum update` et reboot, attente de la resynchronisation, redistribution des VM |
 | Patching Windows d'une VM DataCore | **16** `ha-off`, puis **15** `ha-on` | Voir ci-dessous (phases `PrePatch` / `PostPatch`) |
 | Mise à jour SANsymphony (PSP) | **16** `ha-off`, puis **15** `ha-on` | Voir ci-dessous |
 | Modification de `datacore-xcp.conf` ou du script | **3** `sync` | Contrôler les md5 affichés |
 | État | **18** `status`, **19** `check` | aucune |
+
+**Ordre d'arrêt : les VM de production avant DataCore.** Les disques des VM invitées sont sur le SR DataCore : une VM encore en marche quand DataCore s'arrête perd ses disques en pleine écriture. `stop`, en mode normal comme en mode onduleur, procède donc dans cet ordre :
+
+1. désactivation de la HA ;
+2. arrêt propre de **toutes** les VM en marche du pool hors VM DataCore, en parallèle ; arrêt forcé d'une VM au bout de `SHUTDOWN_TIMEOUT` (300 s), ou tout de suite si elle n'a pas d'outils invités ;
+3. contrôle qu'aucune VM invitée n'est restée en marche ou en pause. S'il en reste : en mode normal, le script demande s'il faut continuer ; en mode onduleur, il le signale et continue, puisque le courant va manquer ;
+4. détachement des SR DataCore, puis arrêt de la VM DataCore 2, puis de la VM DataCore 1 ;
+5. en mode onduleur, arrêt de l'autre hôte, puis du master.
+
+Deux conditions pour que l'arrêt des VM soit réellement propre :
+
+- **outils invités installés dans chaque VM de production** (XCP-ng PV Tools sous Windows, `xe-guest-utilities` sous Linux). Sans eux, XAPI ne peut pas demander l'arrêt au système invité et le script force l'arrêt. `xe vm-list params=name-label,PV-drivers-detected` donne l'état de chaque VM ;
+- **autonomie de l'onduleur suffisante**. Pire cas : `SHUTDOWN_TIMEOUT` pour les VM invitées (en parallèle), puis deux fois `SHUTDOWN_TIMEOUT` pour les VM DataCore (l'une après l'autre), puis `SHUTDOWN_TIMEOUT` pour l'autre hôte, soit 4 × 300 s = 20 minutes avec la valeur par défaut. Le cas courant est bien plus court ; le chronométrer au test de la section 8 et régler le seuil de déclenchement de l'agent onduleur avec une marge. Si l'autonomie est inférieure, réduire `SHUTDOWN_TIMEOUT` plutôt que de laisser le courant couper en cours d'arrêt.
+
+Le déroulé est tracé dans `/var/log/datacore-xcp.log` (`VM invitees : arret de N VM AVANT les VM DataCore`, une ligne par VM, puis `VM invitees : toutes arretees`).
 
 **Ordre des serveurs DataCore à l'arrêt et au redémarrage.** Le serveur arrêté en dernier détient les écritures les plus récentes : il redémarre en premier. `stop` arrête toujours la VM DataCore 2 puis la VM DataCore 1 (un serveur déjà arrêté, par exemple en maintenance, est sauté). Il mémorise le dernier arrêté dans la base du pool, répliquée sur les deux hôtes et indépendante du master : `other-config:datacore-last-stopped`.
 
@@ -778,6 +793,7 @@ Les scripts intègrent déjà la correction de chacun de ces cas, sauf la perte 
 | `Test` : avertissement « session de l'initiateur vers ... (inutile) » sur DC-FE1 ou DC-FE2 | Connexions vers les ports front-end du partenaire créées par une version antérieure de la procédure | `InitiatorPorts` réduit à MR1 et MR2, puis `Initiator` sur chaque VM (section 5.3, étape 11) |
 | Connexions de l'initiateur ou sessions des dom0 perdues après une modification dans la DMC | IQN d'un port modifié après la phase `Initiator` ou la déclaration des hôtes | IQN fixés avant la phase `Initiator`, plus modifiés ensuite |
 | Valeurs du site perdues à chaque nouvelle version d'un script | Valeurs écrites dans le script lui-même | Variables dans `datacore-xcp.conf` et `DataCoreNode.psd1` |
+| Arrêt sur onduleur : des VM de production sont coupées sans arrêt propre, ou tournent encore quand les VM DataCore s'arrêtent | VM sans outils invités (arrêt propre impossible, donc forcé), ou VM en pause non prise en compte ; aucun contrôle avant l'arrêt de DataCore ; étape absente de la procédure | `stop` contrôle qu'aucune VM invitée ne reste en marche ou en pause avant de détacher les SR et d'arrêter DataCore, et trace chaque arrêt (propre ou forcé) ; outils invités et autonomie de l'onduleur en section 9 |
 | `stop --ups` arrête le master avant l'autre hôte | Ordre des hôtes fixé par numéro (2 puis 1) alors que le master avait changé après une bascule HA ; le master éteint ne transmet plus l'arrêt | Ordre calculé sur le rôle réel : autre hôte d'abord, attente de son arrêt (`SHUTDOWN_TIMEOUT`), master en dernier |
 | Serveurs DataCore redémarrés dans le désordre | `start` démarrait la VM DataCore 1 puis la 2 sans attente, quel que soit le dernier arrêté ; le *Start DataCore Server* n'était pas demandé | Arrêt toujours 2 puis 1, mémorisé ; `start` démarre le dernier arrêté, attend que DataCore serve, puis l'autre (section 9) |
 | Phase `Ports` refusée : « Des vDisks existent » | Rôles et IQN ne se posent qu'avant tout vDisk, puisque chaque changement réinitialise le port | Poser les ports juste après l'installation ; ensuite, modifier un port isolé dans la DMC, nœud en maintenance |
@@ -823,6 +839,7 @@ Cette version publiée correspond à la révision 8 (2026-10-08). L'historique d
 - Script DataCore Best Practices : relever dans son journal le résultat de chaque réglage sur les cartes PV XCP-ng (RSS, RSC et SR-IOV peuvent ne pas être exposés).
 - `WIN_TEMPLATE` : vérifier le name-label exact du modèle Windows Server 2025 sur le pool (`dcvm` le contrôle).
 - Réactivation de la HA : confirmer qu'elle ne relance pas les VM arrêtées proprement (`start` les démarre de toute façon).
+- **Arrêt des VM de production par `stop` (révision 9)** : vérifié avec des commandes XCP-ng simulées seulement. À rejouer sur le pool avec des VM de production en marche (`stop --ups`), en relevant dans `/var/log/datacore-xcp.log` l'ordre des arrêts et la durée totale.
 - `stop --ups` : valider qu'un arrêt Windows sans *Stop DataCore Server* laisse des vDisks cohérents.
 - `start` : vérifier que le port 3260 d'une VM DataCore est fermé quand DataCore est stoppé dans la DMC et ouvert une fois démarré (`timeout 3 bash -c "</dev/tcp/IP_FE1/3260"` depuis un dom0). Sinon l'attente de `start` ne contrôle rien.
 - `start` après `stop --ups` : vérifier que DataCore repart seul au boot de Windows quand il n'a pas été stoppé dans la DMC.

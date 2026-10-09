@@ -1,6 +1,6 @@
 # DataCore SANsymphony PSP22 deployment on an XCP-ng 8.3 pool (2 nodes)
 
-Version of 2026-10-08 (revision 8). The accepted deviations and the items still open are in section 11.
+Version of 2026-10-09 (revision 9). The accepted deviations and the items still open are in section 11.
 
 ## 1. Scope and architecture
 
@@ -76,7 +76,7 @@ The mirror stays strictly VM to VM: the dom0s have no IP on MR1/MR2. Physical NI
   - In that case, validate the "FE link cut" test of section 8: local traffic must keep flowing in the bridge when the physical link goes down.
 - A management network separate from the 4 storage NICs, **on a bond of two NICs** (active/passive, ideally across two switches). The HA network heartbeat only goes over this network. On a 2-host pool, losing it on one host ends, after `HA_TIMEOUT`, in the fence of one of the two hosts even though storage and DataCore are healthy (test of section 8): the hosts cannot tell this from a crash of the other one. The bond is the only protection.
 - **The management VIF of the DataCore VMs must not depend on the single management link of a host.** The DataCore servers talk to each other over this network: when the management cable of host 2 was unplugged with the DataCore VMs on that same link, they lost each other and the front-end of host 2 was cut. With the DataCore VMs on a dedicated network, DataCore stayed healthy. Put VIF 0 on a dedicated network (`DC_MGMT_NET`) or on the bonded management network.
-- A UPS able to trigger a command on the master (NUT or vendor agent), to run `./datacore-xcp.sh stop --ups`. A simultaneous power loss on both nodes has two effects: DataCore RAM-cached writes are lost, and the next boot gets stuck (section 9).
+- A UPS able to trigger a command on the master (NUT or vendor agent), to run `./datacore-xcp.sh stop --ups`. Its runtime must cover the full shutdown, production VMs included (budget in section 9), and the command must be triggered early enough. A simultaneous power loss on both nodes has two effects: DataCore RAM-cached writes are lost, and the next boot gets stuck (section 9).
 - BIOS/UEFI of each host set as DataCore recommends for a DataCore Server (the DataCore VM shares the host's CPUs): Intel Turbo Boost disabled, power saving (C-states) disabled with the Static High / maximum performance profile, Collaborative Power Control disabled, AES-NI enabled, Hyper-Threading enabled on CPUs from 2014 or later. The server vendor's low-latency profile applies unless it contradicts these settings.
 - If the storage links go through switches: no Spanning Tree on the iSCSI ports (STP, RSTP, MSTP), hardware flow control on the NICs and the switch ports, no oversubscription, switch MTU above `MTU`.
 
@@ -177,7 +177,7 @@ The menu shows the equivalent direct command, returns to the menu after each act
 | 19 | `check [--quiet]` | each host (cron, 5 min) | Re-reads the kernel ALUA state as `relogin` does. Reports any DataCore LUN with fewer than 4 `ready` paths, any `ready` path still not active for the kernel and, on the master, HA enabled with a timeout other than `HA_TIMEOUT` (syslog unless `--quiet`, exit code 1) |
 | 20 | `mpverify` | each host | Checks that the effective multipath configuration is still the one written by `host N` (`defaults`, DataCore block, `hwhandler='1 alua'` on the maps) and that the cron file carries its `PATH`. An XCP-ng update can replace the multipath files. Exit code 1 on drift: rerun `host N` |
 | 21 | `start` | master | Ordered cold start: the DataCore VM stopped last starts first, and DataCore must answer on port 3260 before the other one starts; uncontrolled shutdown detected (section 9). Then SRs, HA and protected VMs by order |
-| 22 | `stop [--ups]` | master | Ordered full shutdown: guest VMs, SRs, DataCore VM 2 then 1 (last shutdown recorded in the pool database), then the other host and the master last; `--ups` without confirmation, hosts included |
+| 22 | `stop [--ups]` | master | Ordered full shutdown: **clean shutdown of all guest (production) VMs first**, in parallel, forced after `SHUTDOWN_TIMEOUT`, with a check that none is left; then SRs, DataCore VM 2 then 1 (last shutdown recorded in the pool database), then the other host and the master last; `--ups` without confirmation, hosts included |
 | 23 / 24 | `maint N` / `resume N` | master | Put a node into maintenance / bring it back (XCP-ng patching). `resume N` first runs `mpverify` on host N and stops on drift |
 | 25 | `rescue` | stuck host | Emergency exit from HA (statefile deadlock) |
 
@@ -587,7 +587,7 @@ done | tee /root/alua-watch-$(date +%H%M).log
 | Management network loss | Unplug host 2's management (single link, no bond) | DataCore healthy if the DataCore VMs are on `DC_MGMT_NET`. One host fences after `HA_TIMEOUT` (120 s): designed xHA behavior on 2 hosts (section 7). Its protected VMs restart on the other host |
 | Management network loss, bonded management | Unplug one link of the management bond of host 2 | No heartbeat loss, no fence |
 | Shutdown and cold start (`stop` / `start`) | **22** `stop`, then **21** `start` | After `stop`: key `datacore-last-stopped` set to `1:dmc`. `start` starts DataCore VM 1, asks for *Start DataCore Server*, waits for port 3260, then handles DataCore VM 2; key cleared; no full resynchronization in the DMC; SRs attached and **usable without running `iscsi` by hand**, HA enabled only once the paths are active for the kernel; protected VMs started by order, to be timed |
-| UPS shutdown (`stop --ups`) | Command alone, then `start` | DataCore VM 2 stopped before VM 1, key set to `1:ups`; other host powered off before the master. At `start`: DataCore restarts on its own at Windows boot, DataCore VM 1 serves before VM 2 starts; vDisks consistent |
+| UPS shutdown (`stop --ups`) | Command alone, production VMs running on both hosts, then `start` | All guest VMs stopped cleanly **before** any DataCore VM (log: `Guest VMs: all halted` before `Shutting down DC-02`), no disk error in the guests at restart; DataCore VM 2 stopped before VM 1, key set to `1:ups`; other host powered off before the master. At `start`: DataCore restarts on its own at Windows boot, DataCore VM 1 serves before VM 2 starts; vDisks consistent |
 | `stop --ups` after a master failover | Crash of node 1, recovery, then `stop --ups` on host 2, now master | Host 1 powered off before host 2; DataCore VM 2 stopped before VM 1 |
 | Power loss on both nodes, HA enabled | Simultaneous power off | Stuck on `attach-static-vdis`, exit with `rescue` (section 9). `start` reports the uncontrolled shutdown (key missing) and asks for the 'double failure' handling in the DMC before attaching the SRs |
 | Patching cycle | `maint 2` then `resume 2` | Migration, shutdown, return, HA re-enabled |
@@ -622,14 +622,29 @@ Any planned operation starts by disabling HA, and only re-enables it once both v
 
 | Operation | Menu (master) | Manual steps |
 | --- | --- | --- |
-| Full shutdown | **22** `stop`, normal | *Stop DataCore Server* in the DMC one server at a time, when the script asks: DataCore VM 2, then DataCore VM 1; the script then shuts down the other host, then the master |
-| UPS shutdown | `./datacore-xcp.sh stop --ups` | None: triggered by the UPS agent; Windows shutdown of the DataCore VMs (2 then 1), then of the other host, then of the master |
+| Full shutdown | **22** `stop`, normal | The script first shuts down all guest VMs. Then *Stop DataCore Server* in the DMC one server at a time, when the script asks: DataCore VM 2, then DataCore VM 1; the script then shuts down the other host, then the master |
+| UPS shutdown | `./datacore-xcp.sh stop --ups` | None: triggered by the UPS agent; clean shutdown of all guest VMs, then Windows shutdown of the DataCore VMs (2 then 1), then of the other host, then of the master |
 | Cold start | **21** `start` | Power on both hosts, wait for dom0, run `start`. After a normal `stop`: *Start DataCore Server* in the DMC on each DataCore VM when the script asks, DataCore VM 1 first. Confirm *Up to date* (HA is only enabled once the 4 paths are back and active for the kernel on each host); start the unprotected VMs |
 | XCP-ng patching of a node | **23** `maint` then **24** `resume` | *Stop DataCore Server* on DataCore VM N, `yum update` and reboot, wait for resynchronization, rebalance the VMs |
 | Windows patching of a DataCore VM | **16** `ha-off`, then **15** `ha-on` | See below (`PrePatch` / `PostPatch` phases) |
 | SANsymphony update (PSP) | **16** `ha-off`, then **15** `ha-on` | See below |
 | Change to `datacore-xcp.conf` or to the script | **3** `sync` | Check the md5 shown |
 | Status | **18** `status`, **19** `check` | none |
+
+**Shutdown order: production VMs before DataCore.** The disks of the guest VMs are on the DataCore SR: a VM still running when DataCore stops loses its disks in the middle of its writes. `stop`, in normal mode as in UPS mode, therefore proceeds in this order:
+
+1. HA disabled;
+2. clean shutdown of **all** running VMs of the pool other than the DataCore VMs, in parallel; a VM is forced off after `SHUTDOWN_TIMEOUT` (300 s), or at once if it has no guest tools;
+3. check that no guest VM is left running or paused. If some are: in normal mode the script asks whether to continue; in UPS mode it reports it and continues, since power is about to run out;
+4. DataCore SRs detached, then DataCore VM 2 shut down, then DataCore VM 1;
+5. in UPS mode, shutdown of the other host, then of the master.
+
+Two conditions for the VM shutdown to be really clean:
+
+- **guest tools installed in every production VM** (XCP-ng PV Tools on Windows, `xe-guest-utilities` on Linux). Without them XAPI cannot ask the guest system to shut down and the script forces it. `xe vm-list params=name-label,PV-drivers-detected` gives the state of each VM;
+- **enough UPS runtime**. Worst case: `SHUTDOWN_TIMEOUT` for the guest VMs (in parallel), then twice `SHUTDOWN_TIMEOUT` for the DataCore VMs (one after the other), then `SHUTDOWN_TIMEOUT` for the other host, that is 4 × 300 s = 20 minutes with the default value. The usual case is much shorter; time it during the test of section 8 and set the trigger threshold of the UPS agent with a margin. If the runtime is shorter, lower `SHUTDOWN_TIMEOUT` rather than letting power drop in the middle of the shutdown.
+
+The sequence is traced in `/var/log/datacore-xcp.log` (`Guest VMs: shutting down N VM(s) BEFORE the DataCore VMs`, one line per VM, then `Guest VMs: all halted`).
 
 **Order of the DataCore servers at shutdown and restart.** The server stopped last holds the most recent writes: it restarts first. `stop` always stops DataCore VM 2 then DataCore VM 1 (a server already stopped, for example in maintenance, is skipped). It records the last one stopped in the pool database, replicated on both hosts and independent of the master: `other-config:datacore-last-stopped`.
 
@@ -778,6 +793,7 @@ The scripts already include the fix for each of these cases, except the manageme
 | `Test`: warning "initiator session to ... (not needed)" on DC-FE1 or DC-FE2 | Connections to the front-end ports of the partner created by an earlier version of the procedure | `InitiatorPorts` reduced to MR1 and MR2, then `Initiator` on each VM (section 5.3, step 11) |
 | Initiator connections or dom0 sessions lost after a change in the DMC | Port IQN changed after the `Initiator` phase or after the hosts were registered | IQNs set before the `Initiator` phase, never changed afterwards |
 | Site values lost with each new script version | Values written in the script itself | Variables in `datacore-xcp.conf` and `DataCoreNode.psd1` |
+| UPS shutdown: production VMs are cut off without a clean shutdown, or are still running when the DataCore VMs stop | VM without guest tools (clean shutdown impossible, hence forced), or paused VM not taken into account; no check before DataCore stops; step missing from the procedure | `stop` checks that no guest VM is left running or paused before detaching the SRs and stopping DataCore, and traces each shutdown (clean or forced); guest tools and UPS runtime in section 9 |
 | `stop --ups` shuts down the master before the other host | Host order fixed by number (2 then 1) while the master had changed after an HA failover; once powered off, the master no longer relays the shutdown | Order computed from the actual role: other host first, wait for its shutdown (`SHUTDOWN_TIMEOUT`), master last |
 | DataCore servers restarted out of order | `start` started DataCore VM 1 then VM 2 without waiting, whichever was stopped last; *Start DataCore Server* was not requested | Shutdown always 2 then 1, recorded; `start` starts the last one stopped, waits until DataCore serves, then the other (section 9) |
 | `Ports` phase refused: "Virtual disks exist" | Roles and IQNs are only set before any vDisk, since each change resets the port | Set the ports right after installation; afterwards, change a single port in the DMC, node in maintenance |
@@ -824,6 +840,7 @@ This published version is revision 8 (2026-10-08). The detailed change history i
 - DataCore Best Practices script: record in its log the result of each setting on the XCP-ng PV adapters (RSS, RSC and SR-IOV may not be exposed).
 - `WIN_TEMPLATE`: check the exact name-label of the Windows Server 2025 template on the pool (`dcvm` checks it).
 - HA re-enablement: confirm that it does not restart VMs that were shut down cleanly (`start` starts them anyway).
+- **Shutdown of the production VMs by `stop` (revision 9)**: checked with simulated XCP-ng commands only. To replay on the pool with production VMs running (`stop --ups`), recording the order of the shutdowns and the total duration from `/var/log/datacore-xcp.log`.
 - `stop --ups`: validate that a Windows shutdown without *Stop DataCore Server* leaves the vDisks consistent.
 - `start`: check that port 3260 of a DataCore VM is closed when DataCore is stopped in the DMC and open once started (`timeout 3 bash -c "</dev/tcp/IP_FE1/3260"` from a dom0). Otherwise the `start` wait checks nothing.
 - `start` after `stop --ups`: check that DataCore restarts on its own at Windows boot when it was not stopped in the DMC.

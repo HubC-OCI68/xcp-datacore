@@ -593,9 +593,37 @@ cmd_protect() {
 shutdown_vm() {   # return code 2 if the shutdown had to be forced
   local v=$1 name; name=$(xe vm-param-get uuid="$v" param-name=name-label)
   echo "Shutting down $name"
-  timeout "$SHUTDOWN_TIMEOUT" xe vm-shutdown uuid="$v" && return
-  echo "  $name: no clean shutdown within ${SHUTDOWN_TIMEOUT} s -> forced shutdown"
+  timeout "$SHUTDOWN_TIMEOUT" xe vm-shutdown uuid="$v" && { echo "  $name: stopped cleanly"; return 0; }
+  echo "  $name: no clean shutdown (guest tools missing, or not done within ${SHUTDOWN_TIMEOUT} s) -> forced shutdown"
   xe vm-shutdown uuid="$v" --force; return 2
+}
+guests_up() {   # running or paused VMs other than the DataCore VMs ($1 = " uuid1 uuid2 ")
+  local v s
+  for s in running paused; do
+    for v in $(xe vm-list power-state=$s is-control-domain=false --minimal | tr , ' '); do
+      [[ $1 == *" $v "* ]] || echo "$v"
+    done
+  done
+}
+stop_guests() {
+  # Guest (production) VMs first: their disks are on the DataCore SR, so they must all be halted before
+  # the SR is detached and before the DataCore VMs stop. Clean shutdown in parallel, forced after
+  # SHUTDOWN_TIMEOUT, then a check that none is left. $1 = DataCore VM uuids, $2 = 1 in UPS mode.
+  local l v left
+  l=$(guests_up "$1")
+  [[ -n $l ]] || { echo "Guest VMs: none running"; return 0; }
+  echo "Guest VMs: shutting down $(wc -w <<<"$l") VM(s) BEFORE the DataCore VMs (clean shutdown in parallel, ${SHUTDOWN_TIMEOUT} s max, then forced)"
+  for v in $l; do shutdown_vm "$v" & done; wait
+  left=$(guests_up "$1")
+  for v in $left; do
+    echo "  still running: $(xe vm-param-get uuid="$v" param-name=name-label) -> forced shutdown"
+    xe vm-shutdown uuid="$v" --force
+  done
+  left=$(guests_up "$1")
+  [[ -z $left ]] && { echo "Guest VMs: all halted"; return 0; }
+  echo "WARNING: $(wc -w <<<"$left") guest VM(s) could not be stopped: $left"
+  (($2)) && { echo "UPS mode: shutdown continues anyway"; return 0; }
+  ask "Stop the DataCore VMs anyway?" || die "shutdown aborted: guest VMs still running"
 }
 # ---------------------------------------------------------------- DataCore order
 # Shutdown: DC-02 then DC-01 (DC-01 always last). Restart: last stopped first.
@@ -708,9 +736,7 @@ cmd_stop() {
   m=$(local_node) || exit 1; o=$((3-m))
   p=$(pool); dc=" $(vm_uuid 1) $(vm_uuid 2) "
   [[ $(xe pool-param-get uuid="$p" param-name=ha-enabled) == true ]] && xe pool-ha-disable
-  for v in $(xe vm-list power-state=running is-control-domain=false --minimal | tr , ' '); do
-    [[ $dc == *" $v "* ]] || shutdown_vm "$v" &
-  done; wait
+  stop_guests "$dc" "$ups"
   for s in "$SR_NAME" "$HB_SR_NAME"; do for v in $(sr_pbds "$s" currently-attached=true); do xe pbd-unplug uuid="$v"; done; done
   ((ups)) && echo "UPS mode: Windows shutdown of the DataCore VMs without going through the DMC"
   # DataCore: DC-02 then DC-01; a server already stopped (maintenance) is skipped. Records the last stopped.
